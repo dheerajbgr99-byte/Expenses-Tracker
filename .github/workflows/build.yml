@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Standalone APK
 
 on:
   push:
@@ -17,7 +17,6 @@ jobs:
       - name: Extract Project Zip
         run: |
           if [ -f "MyExpenseTracker.zip" ]; then
-            echo "Extracting MyExpenseTracker.zip..."
             unzip -o MyExpenseTracker.zip
             if [ -d "MyExpenseTracker" ]; then
               shopt -s dotglob nullglob
@@ -25,38 +24,196 @@ jobs:
             fi
           fi
 
-      - name: Generate Android Resources & Config
+      - name: Setup Resources & Config
         run: |
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/values app/src/main/res/xml
           cat << 'EOF' > app/src/main/res/values/strings.xml
           <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="app_name">My Expense Tracker</string>
-          </resources>
+          <resources><string name="app_name">My Expense Tracker</string></resources>
           EOF
           cat << 'EOF' > app/src/main/res/values/themes.xml
           <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <style name="Theme.MyExpenseTracker" parent="android:Theme.Material.Light.NoActionBar" />
-          </resources>
+          <resources><style name="Theme.MyExpenseTracker" parent="android:Theme.Material.Light.NoActionBar" /></resources>
           EOF
           cat << 'EOF' > app/src/main/res/xml/backup_rules.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <full-backup-content />
+          <?xml version="1.0" encoding="utf-8"?><full-backup-content />
           EOF
           cat << 'EOF' > app/src/main/res/xml/data_extraction_rules.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <data-extraction-rules>
-              <cloud-backup />
-              <device-transfer />
-          </data-extraction-rules>
+          <?xml version="1.0" encoding="utf-8"?><data-extraction-rules><cloud-backup /><device-transfer /></data-extraction-rules>
           EOF
           sed -i 's/@mipmap\/ic_launcher_round/@android:drawable\/sym_def_app_icon/g' app/src/main/AndroidManifest.xml
           sed -i 's/@mipmap\/ic_launcher/@android:drawable\/sym_def_app_icon/g' app/src/main/AndroidManifest.xml
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.nonTransitiveRClass=true" >> gradle.properties
           echo "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" >> gradle.properties
+
+      - name: Setup Clean Kotlin UI
+        run: |
+          mkdir -p app/src/main/java/com/example/myexpensetracker/ui/theme
+          cat << 'EOF' > app/src/main/java/com/example/myexpensetracker/ui/theme/Theme.kt
+          package com.example.myexpensetracker.ui.theme
+          import androidx.compose.material3.MaterialTheme
+          import androidx.compose.material3.lightColorScheme
+          import androidx.compose.runtime.Composable
+          @Composable
+          fun MyExpenseTrackerTheme(content: @Composable () -> Unit) { MaterialTheme(colorScheme = lightColorScheme(), content = content) }
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/example/myexpensetracker/MainActivity.kt
+          package com.example.myexpensetracker
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.*
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import com.example.myexpensetracker.ui.theme.MyExpenseTrackerTheme
+
+          data class TxItem(val title: String, val amount: Double, val isIncome: Boolean, val category: String)
+
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContent {
+                      MyExpenseTrackerTheme {
+                          Surface(modifier = Modifier.fillMaxSize()) {
+                              ExpenseScreen()
+                          }
+                      }
+                  }
+              }
+          }
+
+          @OptIn(ExperimentalMaterial3Api::class)
+          @Composable
+          fun ExpenseScreen() {
+              var list by remember {
+                  mutableStateOf(
+                      listOf(
+                          TxItem("Salary", 50000.0, true, "Job"),
+                          TxItem("House Rent", 12000.0, false, "Housing"),
+                          TxItem("Groceries", 4500.0, false, "Food")
+                      )
+                  )
+              }
+              var openDialog by remember { mutableStateOf(false) }
+              var title by remember { mutableStateOf("") }
+              var amount by remember { mutableStateOf("") }
+              var isIncome by remember { mutableStateOf(false) }
+
+              val income = list.filter { it.isIncome }.sumOf { it.amount }
+              val expense = list.filter { !it.isIncome }.sumOf { it.amount }
+              val balance = income - expense
+
+              Scaffold(
+                  topBar = {
+                      TopAppBar(
+                          title = { Text("My Expense Tracker", fontWeight = FontWeight.Bold, color = Color.White) },
+                          colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0D9488))
+                      )
+                  },
+                  floatingActionButton = {
+                      FloatingActionButton(
+                          onClick = { openDialog = true },
+                          containerColor = Color(0xFF0D9488),
+                          contentColor = Color.White
+                      ) {
+                          Icon(Icons.Default.Add, contentDescription = "Add")
+                      }
+                  }
+              ) { pad ->
+                  Column(modifier = Modifier.padding(pad).padding(16.dp)) {
+                      Card(
+                          modifier = Modifier.fillMaxWidth(),
+                          colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDFA)),
+                          shape = RoundedCornerShape(16.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(20.dp)) {
+                              Text("Total Balance", fontSize = 14.sp, color = Color(0xFF0F766E))
+                              Text("₹${String.format("%,.2f", balance)}", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color(0xFF134E4A))
+                              Spacer(modifier = Modifier.height(12.dp))
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("Income: ₹${String.format("%,.0f", income)}", color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                                  Text("Expense: ₹${String.format("%,.0f", expense)}", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                              }
+                          }
+                      }
+                      Spacer(modifier = Modifier.height(16.dp))
+                      Text("Transactions", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                      Spacer(modifier = Modifier.height(8.dp))
+                      LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                          items(list) { item ->
+                              Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                                  Row(
+                                      modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                      horizontalArrangement = Arrangement.SpaceBetween,
+                                      verticalAlignment = Alignment.CenterVertically
+                                  ) {
+                                      Column {
+                                          Text(item.title, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+                                          Text(item.category, fontSize = 12.sp, color = Color.Gray)
+                                      }
+                                      Text(
+                                          "${if (item.isIncome) "+" else "-"}₹${String.format("%,.2f", item.amount)}",
+                                          color = if (item.isIncome) Color(0xFF10B981) else Color(0xFFEF4444),
+                                          fontWeight = FontWeight.Bold
+                                      )
+                                  }
+                              }
+                          }
+                      }
+                  }
+
+                  if (openDialog) {
+                      AlertDialog(
+                          onDismissRequest = { openDialog = false },
+                          title = { Text("Add Entry") },
+                          text = {
+                              Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                  OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") })
+                                  OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Amount (₹)") })
+                                  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                      Button(
+                                          onClick = { isIncome = true },
+                                          colors = ButtonDefaults.buttonColors(containerColor = if (isIncome) Color(0xFF10B981) else Color.LightGray)
+                                      ) { Text("Income") }
+                                      Button(
+                                          onClick = { isIncome = false },
+                                          colors = ButtonDefaults.buttonColors(containerColor = if (!isIncome) Color(0xFFEF4444) else Color.LightGray)
+                                      ) { Text("Expense") }
+                                  }
+                              }
+                          },
+                          confirmButton = {
+                              Button(onClick = {
+                                  val a = amount.toDoubleOrNull() ?: 0.0
+                                  if (title.isNotBlank() && a > 0) {
+                                      list = listOf(TxItem(title, a, isIncome, if (isIncome) "Income" else "Expense")) + list
+                                      title = ""
+                                      amount = ""
+                                      openDialog = false
+                                  }
+                              }) { Text("Save") }
+                          },
+                          dismissButton = {
+                              TextButton(onClick = { openDialog = false }) { Text("Cancel") }
+                          }
+                      )
+                  }
+              }
+          }
+          EOF
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
