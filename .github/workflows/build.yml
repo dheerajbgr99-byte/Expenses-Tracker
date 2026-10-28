@@ -1,23 +1,106 @@
-I am attaching/uploading my Android project zip file ("MyExpenseTracker.zip"). 
+name: Build APK
 
-Please extract this project zip and compile the complete offline Personal Expense Tracker Android App into a standalone APK with zero errors.
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
-Project Specifications:
-- Language: Kotlin 2.0.21, Jetpack Compose, Material 3, Android Gradle Plugin 8.7.2
-- Architecture: MVVM, Coroutines, StateFlow, Room Database (100% offline local storage)
-- Target SDK: 35 (Android 15), Min SDK: 26 (Android 8.0)
-- Key Modules & Features:
-  1. Onboarding Screen: On first launch, prompt user for Initial Monthly Salary, Savings Goal (₹), and starting balances (Cash & Bank).
-  2. EMI Tracker with Visual Status Dots:
-     - 🟡 Yellow dot for upcoming / unpaid EMIs
-     - 🟢 Green dot for paid EMIs
-     - 🔴 Red dot for overdue EMIs
-  3. Fixed Expense Categories: Dedicated separate tracking for Room Rent, Electricity Charges, Water Charges, Wi-Fi Bill, and Groceries.
-  4. Budget Comparison: Displays percentage increase or decrease (+% / -%) for every category against the monthly allocation.
-  5. Transaction Details Dialog: Clicking any transaction reveals exact timestamp (Date & Time), payment mode, category badge, and notes.
-  6. Smooth 120 FPS UI: Hardware-accelerated fluid Compose transitions with full Dark Mode and Light Mode support.
-  7. Custom Logo: Circular money bag icon with dollar badge.
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
 
-Action Required:
-1. Ensure all Gradle files (settings.gradle.kts, build.gradle.kts, libs.versions.toml) and XML resources (strings.xml, themes.xml) are present and properly resolved.
-2. Provide the build command ./gradlew assembleDebug and output the standalone app-debug.apk directly.
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Auto-Detect & Extract Any ZIP File
+        run: |
+          echo "Looking for any zip file in repository..."
+          ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Found zip: $ZIP_FILE. Extracting..."
+            unzip -o "$ZIP_FILE" -d extracted_temp
+            
+            # settings.gradle.kts dhoondho chahe kisi bhi folder me ho
+            SETTINGS_DIR=$(find extracted_temp -name "settings.gradle.kts" -exec dirname {} \; | head -n 1)
+            if [ -n "$SETTINGS_DIR" ]; then
+              echo "Found Gradle root in: $SETTINGS_DIR"
+              shopt -s dotglob nullglob
+              cp -rf "$SETTINGS_DIR"/* . 2>/dev/null || true
+            else
+              shopt -s dotglob nullglob
+              cp -rf extracted_temp/* . 2>/dev/null || true
+            fi
+            rm -rf extracted_temp
+          fi
+          
+          # Agar pehle se folder me commit ho
+          if [ ! -f "settings.gradle.kts" ]; then
+            SUB_DIR=$(find . -maxdepth 3 -name "settings.gradle.kts" -not -path "*/.*" -exec dirname {} \; | head -n 1)
+            if [ -n "$SUB_DIR" ] && [ "$SUB_DIR" != "." ]; then
+              echo "Moving files from: $SUB_DIR"
+              shopt -s dotglob nullglob
+              cp -rf "$SUB_DIR"/* . 2>/dev/null || true
+            fi
+          fi
+
+      - name: Generate Android Resources & Config
+        run: |
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/xml
+          cat << 'EOF' > app/src/main/res/values/strings.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">My Expense Tracker</string>
+          </resources>
+          EOF
+          cat << 'EOF' > app/src/main/res/values/themes.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="Theme.MyExpenseTracker" parent="android:Theme.Material.Light.NoActionBar" />
+          </resources>
+          EOF
+          cat << 'EOF' > app/src/main/res/xml/backup_rules.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <full-backup-content />
+          EOF
+          cat << 'EOF' > app/src/main/res/xml/data_extraction_rules.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <data-extraction-rules>
+              <cloud-backup />
+              <device-transfer />
+          </data-extraction-rules>
+          EOF
+          sed -i 's/@mipmap\/ic_launcher_round/@android:drawable\/sym_def_app_icon/g' app/src/main/AndroidManifest.xml || true
+          sed -i 's/@mipmap\/ic_launcher/@android:drawable\/sym_def_app_icon/g' app/src/main/AndroidManifest.xml || true
+          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.nonTransitiveRClass=true" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" >> gradle.properties
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build Debug APK
+        run: |
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --stacktrace
+          else
+            gradle assembleDebug --stacktrace
+          fi
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdvanceExpenseTracker-APK
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
